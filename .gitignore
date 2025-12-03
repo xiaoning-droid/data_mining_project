@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Data files
+*.npy
+*.npz
+*.mat
+*.csv
+*.xlsx
+*.pt
+*.tif
+*.tiff
+
+# Output folders
+/Results/
+/Figures/
+
+# Large data folder
+/course_project_data/
+
+# Temporary office files
+~$*
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Build artifacts
+/build/
+/dist/
+*.egg-info/
