@@ -3,10 +3,7 @@ import numpy as np
 import torch
 import imageio.v2 as imageio
 import matplotlib
-
-# === 强制使用非交互式后端 Agg ===
 matplotlib.use('Agg') 
-
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colorbar
@@ -14,22 +11,20 @@ import matplotlib as mpl
 from matplotlib.colors import Normalize
 from PIL import Image, ImageDraw, ImageFont
 
-# Paths
+
 RESULTS_DIR = r"C:\Users\Xiaonongzi\Desktop\CIVE 650\Project\Results"
 FIG_DIR = r"C:\Users\Xiaonongzi\Desktop\CIVE 650\Project\Figures"
 os.makedirs(FIG_DIR, exist_ok=True)
 
 DATA_NPZ = os.path.join(RESULTS_DIR, "data_prep.npz")
 
-# Config
 MAX_KERNELS = 17 
 GRID_COLS = 4 
 CELL_W = 200
 CELL_H = 100
-TITLE_H = 30        # 标题区域高度
+TITLE_H = 30       
 GIF_DURATION = 0.6 
 
-# === 显示名称映射 ===
 DISPLAY_NAMES = {
     'n100_seed2': 'Random Forest',
     'idw': 'IDW',
@@ -63,7 +58,6 @@ def discover_kernel_tags():
             tag = fn[len('pred_'):-3]
             existing_tags.add(tag)
     
-    # === 强制排序列表 ===
     TARGET_ORDER = [
         'n100_seed2',                        # 1
         'idw',                               # 2
@@ -134,19 +128,14 @@ def array_to_rgba(arr, cmap_name='plasma', vmin=None, vmax=None):
     return rgba_uint8
 
 
-# === 核心修改: 在子图之间增加间距 (GAP) ===
 def make_grid_image(arrays, cols, cell_w, cell_h, cmap='plasma', vmin=None, vmax=None, is_error=False, eabs=None, labels=None):
     n = len(arrays)
     cols = min(cols, n)
     rows = (n + cols - 1) // cols
     
-    GAP = 15  # <--- 定义子图之间的间距 (像素)
+    GAP = 15  
     
-    # 计算画布总宽: 列宽总和 + (列数-1)个间隙
-    # 如果 cols=1, (cols-1)*GAP = 0, 逻辑依然成立
     grid_w = cols * cell_w + (cols - 1) * GAP
-    
-    # 计算画布总高: 行高总和 (含标题) + (行数-1)个间隙
     grid_h = rows * (cell_h + TITLE_H) + (rows - 1) * GAP
     
     canvas = Image.new('RGB', (grid_w, grid_h), (255, 255, 255))
@@ -176,21 +165,16 @@ def make_grid_image(arrays, cols, cell_w, cell_h, cmap='plasma', vmin=None, vmax
         
         img = img.resize((cell_w, cell_h), Image.LANCZOS)
         
-        # === 计算坐标: 加上间隙 GAP ===
         x_base = c * (cell_w + GAP)
         y_base = r * (cell_h + TITLE_H + GAP)
-        # ============================
         
-        # 绘制标题
         if labels and i < len(labels):
             raw_tag = labels[i]
             display_text = get_display_name(raw_tag) 
             draw.text((x_base + 5, y_base + 5), display_text, fill="black", font=font)
 
-        # 粘贴图片
         canvas.paste(img, (x_base, y_base + TITLE_H))
 
-        # 给图片画边框 (BBox)
         rect_coords = [
             x_base, 
             y_base + TITLE_H, 
@@ -241,20 +225,15 @@ def add_colorbar_to_image(pil_img, cmap_name, vmin, vmax, is_error=False, eabs=N
 
 
 def draw_timestamp(img, day):
-    # 1. 定义底部“页脚”高度
     FOOTER_HEIGHT = 60  
     
-    # 2. 创建新画布：宽度不变，高度增加
     new_width = img.width
     new_height = img.height + FOOTER_HEIGHT
     new_img = Image.new('RGB', (new_width, new_height), (255, 255, 255))
     
-    # 3. 将原图贴在顶部
     new_img.paste(img, (0, 0))
     
     draw = ImageDraw.Draw(new_img)
-    
-    # 4. 设置字号
     FONT_SIZE = 32
     try:
         font = ImageFont.truetype("times.ttf", FONT_SIZE)
@@ -266,7 +245,6 @@ def draw_timestamp(img, day):
             
     text = f"Day {day}"
     
-    # 5. 计算文字位置 (在新增加的底部区域居中)
     try:
         bbox = draw.textbbox((0, 0), text, font=font)
         text_w = bbox[2] - bbox[0]
@@ -274,9 +252,7 @@ def draw_timestamp(img, day):
     except AttributeError:
         text_w, text_h = draw.textsize(text, font=font)
 
-    # 横向居中
     x_pos = (new_width - text_w) // 2
-    # 纵向：位于原图高度 + 页脚高度的一半，再微调
     y_pos = img.height + (FOOTER_HEIGHT - text_h) // 2 - 5
     
     draw.text((x_pos, y_pos), text, fill="black", font=font)
@@ -330,8 +306,6 @@ def build_day_frames_for_kernels(tags, pack, day_range):
                 p[lat_idx, lon_idx] = yhat_day
                 e_temp = p - np.full((H,W), np.nan, dtype=np.float32)
                 e_temp[lat_idx, lon_idx] = yhat_day - Yte_day
-
-                # Flip UD
                 p = np.flipud(p)
                 e_temp = np.flipud(e_temp)
                 e = e_temp
@@ -362,15 +336,12 @@ def build_day_frames_for_kernels(tags, pack, day_range):
         arrays_pred = [per_kernel_preds[tag][i] for tag in tags]
         arrays_err = [per_kernel_errs[tag][i] for tag in tags]
         
-        # 1. 生成网格 (Make Grid Image now supports Gaps)
         pred_img = make_grid_image(arrays_pred, GRID_COLS, CELL_W, CELL_H, cmap='plasma', vmin=vmin, vmax=vmax, is_error=False, labels=tags)
         err_img = make_grid_image(arrays_err, GRID_COLS, CELL_W, CELL_H, cmap='coolwarm', is_error=True, eabs=global_eabs, labels=tags)
         
-        # 2. 加色带
         pred_img_with_cbar = add_colorbar_to_image(pred_img, 'plasma', vmin, vmax)
         err_img_with_cbar = add_colorbar_to_image(err_img, 'coolwarm', 0, 0, is_error=True, eabs=global_eabs)
 
-        # 3. 打上时间戳 (在新增加的底部)
         pred_img_with_cbar = draw_timestamp(pred_img_with_cbar, day)
         err_img_with_cbar = draw_timestamp(err_img_with_cbar, day)
 
@@ -431,7 +402,6 @@ def save_single_kernel_day31_images(tags, pack, vmin, vmax, global_eabs, day=31)
             pred_day[lat_idx, lon_idx] = yhat_np[is_day]
             true_day[lat_idx, lon_idx] = Yte_np[is_day]
 
-        # 翻转
         pred_day = np.flipud(pred_day)
         true_day = np.flipud(true_day)
         err_day = pred_day - true_day
@@ -449,15 +419,12 @@ def save_single_kernel_day31_images(tags, pack, vmin, vmax, global_eabs, day=31)
         
         d1 = ImageDraw.Draw(pred_im)
         d1.text((10,10), f"{display_name} (Pred)", fill="black", stroke_fill="white", stroke_width=2, font=font)
-        # 添加边框
         d1.rectangle([0, 0, pred_im.width-1, pred_im.height-1], outline="black", width=1)
 
         d2 = ImageDraw.Draw(err_im)
         d2.text((10,10), f"{display_name} (Err)", fill="black", stroke_fill="white", stroke_width=2, font=font)
-        # 添加边框
         d2.rectangle([0, 0, err_im.width-1, err_im.height-1], outline="black", width=1)
         
-        # === 间距逻辑 GAP ===
         GAP = 20
         w = pred_im.width + GAP + err_im.width
         h = max(pred_im.height, err_im.height)
@@ -465,7 +432,6 @@ def save_single_kernel_day31_images(tags, pack, vmin, vmax, global_eabs, day=31)
         
         canvas.paste(pred_im, (0,0))
         canvas.paste(err_im, (pred_im.width + GAP, 0))
-        # ==================
         
         out_p = os.path.join(FIG_DIR, f'{tag}_day{day}_comparison.png')
         canvas.save(out_p)

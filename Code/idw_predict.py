@@ -3,10 +3,7 @@ import time
 import numpy as np
 import torch
 
-# 路径：这里用的是你 gp_data_prep.py 里 OUT_DIR 的 data_prep.npz
 DATA_NPZ = r"C:\Users\Xiaonongzi\Desktop\CIVE 650\Project\Results\data_prep.npz"
-
-# 结果保存目录（你也可以改到之前的 Results 目录）
 RESULTS_DIR = r"C:\Users\Xiaonongzi\Desktop\CIVE 650\Project\Results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -22,13 +19,11 @@ def idw_interp(xy_train, z_train, xy_query, power=2, eps=1e-6):
     M = xy_query.shape[0]
     z_query = np.empty(M, dtype=float)
 
-    # 距离矩阵 (M, N)
-    diff = xy_query[:, None, :] - xy_train[None, :, :]  # (M, N, 2)
-    dist = np.sqrt(np.sum(diff ** 2, axis=2)) + eps     # (M, N)
+    diff = xy_query[:, None, :] - xy_train[None, :, :]  
+    dist = np.sqrt(np.sum(diff ** 2, axis=2)) + eps     
 
     for i in range(M):
-        di = dist[i]  # (N,)
-        # 如果 query 点和某个训练点非常接近，直接用那个训练点的值
+        di = dist[i]  
         zero_mask = di < eps * 10
         if np.any(zero_mask):
             z_query[i] = z_train[zero_mask][0]
@@ -42,10 +37,10 @@ def idw_interp(xy_train, z_train, xy_query, power=2, eps=1e-6):
 
 def main():
     pack = np.load(DATA_NPZ)
-    X_train = pack["X_train"]    # (N_train, 3) [lat, lon, day]
-    y_train = pack["y_train"]    # (N_train,)
-    X_test  = pack["X_test"]     # (N_test, 3)
-    y_test  = pack["y_test"]     # (N_test,)
+    X_train = pack["X_train"]    
+    y_train = pack["y_train"]    
+    X_test  = pack["X_test"]     
+    y_test  = pack["y_test"]    
     H = int(pack["H"])
     W = int(pack["W"])
     T = int(pack["T"])
@@ -54,13 +49,9 @@ def main():
     print("X_train:", X_train.shape, "X_test:", X_test.shape)
     print("H, W, T =", H, W, T)
 
-    # 记录开始时间（用于报告运行/训练时间）
     start_time = time.time()
-
-    # 预测结果数组，和 y_test 对齐
     yhat = np.empty_like(y_test)
 
-    # 按天循环做 IDW（只用同一天的训练点来预测同一天的测试点）
     for day in range(1, T + 1):
         mask_tr = (X_train[:, 2] == day)
         mask_te = (X_test[:, 2] == day)
@@ -68,45 +59,38 @@ def main():
         n_tr = np.sum(mask_tr)
         n_te = np.sum(mask_te)
         if n_te == 0:
-            continue  # 这一天没有测试点，跳过
+            continue 
         if n_tr == 0:
-            # 这一天没有训练点，直接用全局平均
             print(f"Day {day}: no training points, filling with global mean")
             yhat[mask_te] = y_train.mean()
             continue
 
-        xy_tr = X_train[mask_tr][:, :2]  # (n_tr, 2) [lat, lon]
-        z_tr  = y_train[mask_tr]         # (n_tr,)
-        xy_te = X_test[mask_te][:, :2]   # (n_te, 2)
+        xy_tr = X_train[mask_tr][:, :2]  
+        z_tr  = y_train[mask_tr]       
+        xy_te = X_test[mask_te][:, :2]   
 
         print(f"Day {day:2d}: train={n_tr:5d}, test={n_te:5d} -> IDW...")
         yhat_day = idw_interp(xy_tr, z_tr, xy_te, power=2)
         yhat[mask_te] = yhat_day
 
-    # 计算整体指标：RMSE / MAE / R2 / MAPE
     mse = np.mean((yhat - y_test) ** 2)
     rmse = float(np.sqrt(mse))
     mae = float(np.mean(np.abs(yhat - y_test)))
 
-    # R^2
     ss_res = np.sum((y_test - yhat) ** 2)
-    ss_tot = np.sum((y_test - np.mean(y_test)) ** 2) + 1e-12  # 防止除 0
+    ss_tot = np.sum((y_test - np.mean(y_test)) ** 2) + 1e-12 
     r2 = float(1.0 - ss_res / ss_tot)
 
-    # MAPE（对 0 值做稳健处理）
     eps = 1e-6
     denom = np.maximum(np.abs(y_test), eps)
     mape = float(np.mean(np.abs((y_test - yhat) / denom)) * 100.0)
 
-    # 运行时间（秒）
     train_time_s = float(time.time() - start_time)
 
     print(f"IDW overall RMSE = {rmse:.4f}, MAE = {mae:.4f}, R2 = {r2:.4f}, MAPE = {mape:.4f}%")
     print(f"IDW total runtime (s) = {train_time_s:.2f}")
 
-    # 保存成和你 GP 代码兼容的格式，并包含新增指标
     out_pt = os.path.join(RESULTS_DIR, "pred_idw.pt")
-    # 为了后续绘图/CRPS 计算，保存一个 ystd（当前使用很小的常数或 0）以及 meta 信息
     ystd = np.zeros_like(yhat, dtype=np.float32)
     meta = {
         'method': 'idw',

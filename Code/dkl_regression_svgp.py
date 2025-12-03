@@ -1,20 +1,4 @@
-r"""
-Variational DKL (SVGP) for large data.
 
-This script implements a DKL model where the GP is variational/inducing-point
-based (ApproximateGP) so training works with minibatches on large datasets.
-
-Usage (PowerShell):
-  cd "C:\Users\Xiaonongzi\Desktop\CIVE 650\Project\Code"
-  conda activate lst-gpu
-  python .\dkl_regression_svgp.py --m 512 --epochs 50 --batch 1024
-
-Outputs saved to `Results/`:
-  - `dkl_svgp_model.pt` (state dict)
-  - `dkl_svgp_y_true_vs_pred.png`
-  - `metrics_dkl_svgp.json`
-
-"""
 import os
 import json
 import time
@@ -50,16 +34,12 @@ class DeepFeatureExtractor(nn.Module):
 
 class VariationalDKLModel(gpytorch.models.ApproximateGP):
     def __init__(self, inducing_points, feature_extractor, num_mixtures=4):
-        # inducing_points: Tensor (M, feature_dim)
         variational_distribution = gpytorch.variational.CholeskyVariationalDistribution(inducing_points.size(0))
         variational_strategy = gpytorch.variational.VariationalStrategy(
             self, inducing_points, variational_distribution, learn_inducing_locations=True
         )
         super().__init__(variational_strategy)
 
-        # note: this model expects inputs to be the projected features
-        # (i.e. call model(feature_extractor(x))). We keep feature_extractor
-        # passed in for parameter collection but do NOT apply it inside forward.
         self.feature_extractor = feature_extractor
         feature_dim = inducing_points.size(1)
         self.mean_module = gpytorch.means.ConstantMean()
@@ -67,7 +47,6 @@ class VariationalDKLModel(gpytorch.models.ApproximateGP):
         self.covar_module = gpytorch.kernels.ScaleKernel(self.base_covar)
 
     def forward(self, x_projected):
-        # x_projected: (N, feature_dim) - features produced by the feature extractor
         mean_x = self.mean_module(x_projected)
         covar_x = self.covar_module(x_projected)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
@@ -89,7 +68,6 @@ def main():
     X_test = pack["X_test"]
     y_test = pack["y_test"].astype(np.float32)
 
-    # convert tensors
     Xtr = torch.from_numpy(X_train).float()
     Xte = torch.from_numpy(X_test).float()
     Ytr = torch.from_numpy(y_train).float().reshape(-1)
@@ -98,14 +76,12 @@ def main():
     N = Xtr.size(0)
     print(f"Loaded data: N_train={N}, N_test={Xte.size(0)}")
 
-    # standardize Y
     y_mean = Ytr.mean()
     y_std = Ytr.std()
     Ytr_norm = (Ytr - y_mean) / (y_std + 1e-8)
 
     feature_extractor = DeepFeatureExtractor(input_dim=Xtr.size(1), feature_dim=args.feature_dim).to(device)
 
-    # initialize inducing points by a small sample pushed through current (untrained) feature extractor
     init_idx = torch.randperm(N)[: args.m]
     with torch.no_grad():
         inducing_init = feature_extractor(Xtr[init_idx].to(device)).detach().cpu()
@@ -115,18 +91,13 @@ def main():
     model = VariationalDKLModel(inducing_points, feature_extractor, num_mixtures=args.num_mixtures).to(device)
     likelihood = gpytorch.likelihoods.GaussianLikelihood().to(device)
 
-    # variational ELBO
     mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=N)
-
-    # optimizer: include feature extractor params, model hyperparams and likelihood
     optimizer = torch.optim.Adam([
         {'params': model.feature_extractor.parameters(), 'lr': args.lr},
         {'params': model.covar_module.parameters(), 'lr': args.lr},
         {'params': model.mean_module.parameters(), 'lr': args.lr},
         {'params': likelihood.parameters(), 'lr': args.lr},
     ], lr=args.lr)
-
-    # data loader (use CPU tensors, transfer batches to device)
     ds = torch.utils.data.TensorDataset(Xtr, Ytr_norm)
     dl = torch.utils.data.DataLoader(ds, batch_size=args.batch, shuffle=True, num_workers=0)
 
@@ -136,7 +107,6 @@ def main():
         total_nll = 0.0
         for xb, yb in dl:
             xb = xb.to(device); yb = yb.to(device)
-            # project to feature space before calling the GP
             xb_proj = model.feature_extractor(xb)
             optimizer.zero_grad()
             output = model(xb_proj)
@@ -150,10 +120,8 @@ def main():
     train_time = time.time() - t0
     print(f"Training finished in {train_time:.1f}s")
 
-    # eval + predict on test set
     model.eval(); likelihood.eval()
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
-        # predict in batches
         mu_list = []
         std_list = []
         bs = args.batch
@@ -167,11 +135,9 @@ def main():
     mu_n = torch.cat(mu_list, 0)
     std_n = torch.cat(std_list, 0)
 
-    # unnormalize
     yhat = mu_n * (y_std + 1e-8) + y_mean
     ystd = std_n * (y_std + 1e-8)
 
-    # metrics
     mse = torch.mean((yhat - Yte)**2).item()
     rmse = float(np.sqrt(mse))
     mae = float(torch.mean(torch.abs(yhat - Yte)).item())
@@ -186,7 +152,6 @@ def main():
         'train_time_sec': train_time,
     }
 
-    # save model state (feature extractor + gp + likelihood)
     save_path = os.path.join(OUT_DIR, 'dkl_svgp_model.pt')
     torch.save({
         'model_state_dict': model.state_dict(),
@@ -196,8 +161,6 @@ def main():
         'metrics': metrics,
     }, save_path)
     print('Saved model to:', save_path)
-
-    # save metrics
     metrics_path = os.path.join(OUT_DIR, 'metrics_dkl_svgp.json')
     with open(metrics_path, 'w', encoding='utf-8') as f:
         json.dump(metrics, f, indent=2)
